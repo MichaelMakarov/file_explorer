@@ -25,6 +25,7 @@ namespace WindowsFormsApp
         
         private readonly string[] _labels = { "Start", "Continue", "Stop" };
         Thread _processor;
+        private bool _stopThread = false;
         int _filesNumber = 0;
         private delegate void AddNodeDelegate();
         private delegate void ChangeTextDelegate();
@@ -54,11 +55,19 @@ namespace WindowsFormsApp
             Load();
             _trigger.Text = _labels[0];
             _trigger.Click += Show_Result;
+            _textDirectory.TextChanged += Restart;
+            _textFileTemplate.TextChanged += Restart;
+            _textKeyWords.TextChanged += Restart;
         }
         
+        private void Restart(object sender, EventArgs e)
+        {
+            _trigger.Text = _labels[0];
+            _stopThread = true;
+        }
         public void Finish(object sender, EventArgs e)
         {
-            if (_processor != null && _processor.IsAlive) _processor.Join();
+            _stopThread = true;
             Save();
         }
         private void Save()
@@ -100,6 +109,7 @@ namespace WindowsFormsApp
         {
             if (_trigger.Text == _labels[0])
             {
+                _stopThread = false;
                 if (!Directory.Exists(_textDirectory.Text))
                 {
                     MessageBox.Show(_textDirectory.Text + " does not exist!");
@@ -114,8 +124,7 @@ namespace WindowsFormsApp
                     _results.EndUpdate();
                     _startTime = DateTime.Now.TimeOfDay;
                     _timer.Start();
-                    _processor = new Thread(Process) { Name = "Explorer" };
-                    _processor.Start();
+                    ThreadPool.QueueUserWorkItem(Process);
                     return;
                 }
             }
@@ -134,8 +143,9 @@ namespace WindowsFormsApp
                 return;
             }
         }
-        private void Process()
+        private void Process(object state)
         {
+            _processor = Thread.CurrentThread;
             DirectoryInfo current = new DirectoryInfo(_textDirectory.Text),
                 source = current.Parent;
             string[] splitter1 = { "." }, splitter2 = { "*" };
@@ -151,14 +161,14 @@ namespace WindowsFormsApp
                 Search(_results.Nodes[0], current, begin, end, extension);
                 Clean_Results(_results.Nodes[0], extension);
             }
-
+            _timer.Stop();
             ChangeTextDelegate change = new ChangeTextDelegate(() => Change_Trigger_Text());
             change += () => Change_Current_File("");
             _trigger.Invoke(change);
-            _timer.Stop();
         }
         private int Search(TreeNode source, DirectoryInfo current, string begin, string end, string extension)
         {
+            if (_stopThread) return 0;
             bool flag = true;
             int filesNumber = 0;
             foreach (FileInfo file in current.GetFiles())
@@ -196,10 +206,9 @@ namespace WindowsFormsApp
                         {
                             string text = Read_TextFile(file.FullName);
                             string[] splitter = { " " };
-                            flag = false;
                             foreach (var word in _textKeyWords.Text.Split(splitter, StringSplitOptions.None))
                             {
-                                if (text.Contains(word)) flag = true;
+                                if (!text.Contains(word)) flag = false;
                             }
                         }
                     }
@@ -211,32 +220,25 @@ namespace WindowsFormsApp
                     _results.Invoke(add);
                 }
             }
-            //var directories = current.GetDirectories();
-            //if (filesNumber == 0 && directories.Length == 0)
-            //{
-            //    AddNodeDelegate remove = new AddNodeDelegate(() => Delete_TreeViewNode(source.Parent, source));
-            //    _results.Invoke(remove);
-            //}
-            //else
+            foreach (DirectoryInfo directory in current.GetDirectories())
             {
-                foreach (DirectoryInfo directory in current.GetDirectories())
+                TreeNode newNode = new TreeNode(directory.FullName);
+                AddNodeDelegate add = new AddNodeDelegate(() => Add_New_TreeViewNode(source, newNode));
+                _results.Invoke(add);
+                filesNumber += Search(newNode, directory, begin, end, extension);
+                if (_stopThread) return 0;
+                if (filesNumber == 0)
                 {
-                    TreeNode newNode = new TreeNode(directory.FullName);
-                    AddNodeDelegate add = new AddNodeDelegate(() => Add_New_TreeViewNode(source, newNode));
-                    _results.Invoke(add);
-                    filesNumber += Search(newNode, directory, begin, end, extension);
-                    if (filesNumber == 0)
-                    {
-                        AddNodeDelegate remove = new AddNodeDelegate(() => Delete_TreeViewNode(source, newNode));
-                        _results.Invoke(remove);
-                    }
+                    AddNodeDelegate remove = new AddNodeDelegate(() => Delete_TreeViewNode(source, newNode));
+                    _results.Invoke(remove);
                 }
             }
-            
+
             return filesNumber;
         }
         private void Clean_Results(TreeNode source, string extension)
         {
+            if (_stopThread) return;
             AddNodeDelegate remove = new AddNodeDelegate(() => { return; });
             foreach (TreeNode node in source.Nodes)
             {
