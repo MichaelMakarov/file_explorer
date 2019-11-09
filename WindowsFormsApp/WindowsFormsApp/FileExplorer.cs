@@ -169,10 +169,10 @@ namespace WindowsFormsApp
         private int Search(TreeNode source, DirectoryInfo current, string begin, string end, string extension)
         {
             if (_stopThread) return 0;
-            bool flag = true;
             int filesNumber = 0;
             foreach (FileInfo file in current.GetFiles())
             {
+                bool flag = true;
                 _filesNumber++;
                 ChangeCurrentFileDelegate change = new ChangeCurrentFileDelegate(() => Change_Current_File(file.FullName));
                 _curFile.Invoke(change);
@@ -226,12 +226,13 @@ namespace WindowsFormsApp
                 AddNodeDelegate add = new AddNodeDelegate(() => Add_New_TreeViewNode(source, newNode));
                 _results.Invoke(add);
                 filesNumber += Search(newNode, directory, begin, end, extension);
-                if (_stopThread) return 0;
+                
                 if (filesNumber == 0)
                 {
                     AddNodeDelegate remove = new AddNodeDelegate(() => Delete_TreeViewNode(source, newNode));
                     _results.Invoke(remove);
                 }
+                if (_stopThread) return 0;
             }
 
             return filesNumber;
